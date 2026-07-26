@@ -26,7 +26,12 @@ class Settings(BaseSettings):
     # App
     app_host: str = "0.0.0.0"
     app_port: int = 8000
-    cors_origins: str = "http://localhost:3000"
+    # CORS — comma-separated list of allowed frontend origins.
+    # Defaults to * (allow all) so deployments work out of the box.
+    # WARNING: In production, restrict this to specific trusted origins to prevent
+    # unwanted cross-origin access, e.g.:
+    #   CORS_ORIGINS=https://your-frontend.example.com
+    cors_origins: str = "*"
 
     @property
     def cors_origins_list(self) -> list[str]:

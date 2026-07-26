@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "export",
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
-  },
+  // "standalone" bundles the Node.js server for Docker deployments.
+  // The GitHub Pages workflow overrides this to "export" automatically via
+  // the actions/configure-pages step, so static-site builds still work.
+  output: "standalone",
 };
 
 module.exports = nextConfig;

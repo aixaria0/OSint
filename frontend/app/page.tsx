@@ -5,6 +5,8 @@ import dynamic from "next/dynamic";
 import type { Node, Edge } from "reactflow";
 import ResultCard from "@/components/ResultCard";
 import AIPanel from "@/components/AIPanel";
+import ApiConfigPanel from "@/components/ApiConfigPanel";
+import { getApiUrl, getWebSocketUrl } from "@/lib/api";
 
 const GraphView = dynamic(() => import("@/components/GraphView"), { ssr: false });
 
@@ -35,6 +37,9 @@ const DEFAULT_SEARCH_ERROR = "Search failed. Check the API connection and try ag
 
 type WsStatus = "connecting" | "connected" | "disconnected" | "error";
 type LoadingState = "idle" | "loading" | "done" | "error";
+type QueryType = "auto" | "ip" | "domain" | "email" | "phone" | "hash" | "url" | "username";
+
+const QUERY_TYPES: QueryType[] = ["auto", "ip", "domain", "email", "phone", "hash", "url", "username"];
 
 const WS_STATUS_CLASS: Record<WsStatus, string> = {
   connecting: "text-yellow-400",
@@ -42,6 +47,15 @@ const WS_STATUS_CLASS: Record<WsStatus, string> = {
   disconnected: "text-slate-400",
   error: "text-red-400",
 };
+
+function parseWsMessage(payload: unknown): WsEvent | SearchResponse | null {
+  if (typeof payload !== "string") return null;
+  try {
+    return JSON.parse(payload) as WsEvent | SearchResponse;
+  } catch {
+    return null;
+  }
+}
 
 function buildGraph(data: SearchResponse): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
@@ -138,8 +152,16 @@ export default function OmniTraceDashboard() {
   const [wsStatus, setWsStatus] = useState<WsStatus>("connecting");
   const [loadingState, setLoadingState] = useState<LoadingState>("idle");
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<QueryType>("auto");
+  const [sandboxTarget, setSandboxTarget] = useState("");
+  const [apiConfigured, setApiConfigured] = useState<boolean | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Detect whether a backend URL is available (runs client-side only).
+  useEffect(() => {
+    setApiConfigured(getApiUrl() !== null);
+  }, []);
 
   useEffect(() => {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,8 +170,13 @@ export default function OmniTraceDashboard() {
     const baseDelay = 1000;
 
     const connect = () => {
-      const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const wsUrl = base.replace(/^http(s?)/, (_match, secure: string) => (secure ? "wss" : "ws")) + "/ws";
+      const apiUrl = getApiUrl();
+      if (!apiUrl) {
+        setWsStatus("disconnected");
+        return;
+      }
+
+      const wsUrl = getWebSocketUrl(apiUrl);
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -158,7 +185,8 @@ export default function OmniTraceDashboard() {
         reconnectAttempts = 0;
       };
       ws.onmessage = (event) => {
-        const message: WsEvent | SearchResponse = JSON.parse(event.data);
+        const message = parseWsMessage(event.data);
+        if (!message) return;
 
         if ("type" in message && typeof message.type === "string" && WS_EVENT_TYPES.has(message.type)) {
           const wsEvent = message as WsEvent;
@@ -204,16 +232,24 @@ export default function OmniTraceDashboard() {
       };
     };
 
+    // Only attempt a connection when a backend URL is (or may be) available.
+    // When apiConfigured is explicitly false the panel is showing and there is
+    // no URL to connect to, so skip to avoid a redundant connect/disconnect cycle.
+    if (apiConfigured === false) {
+      setWsStatus("disconnected");
+      return;
+    }
+
     connect();
 
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- runs once to establish persistent WebSocket connection
+  }, [apiConfigured]); // re-run when apiConfigured changes so we connect once a URL is saved
 
-  const handleSearch = async () => {
-    const q = query.trim();
+  const handleSearch = async (searchQuery = query, forceType = selectedType) => {
+    const q = searchQuery.trim();
     if (!q || loadingState === "loading") return;
 
     setLoadingState("loading");
@@ -223,17 +259,26 @@ export default function OmniTraceDashboard() {
     setGraphEdges([]);
 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ query: q, query_type: "auto" }));
+      wsRef.current.send(JSON.stringify({
+        query: q,
+        ...(forceType === "auto" ? {} : { force_type: forceType }),
+      }));
       return;
     }
 
     // REST fallback when WebSocket is unavailable
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const apiUrl = getApiUrl();
+      if (!apiUrl) {
+        throw new Error("Search service is not configured.");
+      }
       const res = await fetch(`${apiUrl}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q, query_type: "auto" }),
+        body: JSON.stringify({
+          query: q,
+          ...(forceType === "auto" ? {} : { force_type: forceType }),
+        }),
       });
 
       if (!res.ok) {
@@ -263,7 +308,10 @@ export default function OmniTraceDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-8">
+    <div className="min-h-screen text-green-200">
+      {apiConfigured === false && (
+        <ApiConfigPanel onConnected={() => setApiConfigured(true)} />
+      )}
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-4xl font-bold">OmniTrace Intelligence Platform</h1>
         <span className={`text-sm font-medium ${WS_STATUS_CLASS[wsStatus]}`}>
@@ -271,7 +319,25 @@ export default function OmniTraceDashboard() {
         </span>
       </div>
 
-      <div className="flex gap-4 mb-8">
+      <div className="cyber-panel mb-8 p-4 sm:p-6">
+        <div className="mb-4 flex flex-wrap gap-2" aria-label="Query type">
+          {QUERY_TYPES.map((type) => (
+            <button
+              key={type}
+              type="button"
+              aria-pressed={selectedType === type ? "true" : "false"}
+              onClick={() => setSelectedType(type)}
+              className={`border px-3 py-2 text-xs font-bold uppercase tracking-widest transition ${
+                selectedType === type
+                  ? "border-red-500 bg-red-950/40 text-red-300"
+                  : "border-green-950 bg-black/30 text-green-700 hover:border-green-700 hover:text-green-400"
+              }`}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row">
         <input
           type="text"
           value={query}
@@ -283,15 +349,16 @@ export default function OmniTraceDashboard() {
             }
           }}
           className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-          placeholder="Search IP, domain, email, hash…"
+          placeholder="Enter target: IP, domain, email, hash, URL..."
         />
         <button
-          onClick={handleSearch}
+          onClick={() => void handleSearch()}
           disabled={!query.trim() || loadingState === "loading"}
           className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 px-8 py-3 rounded-lg font-medium transition"
         >
-          {loadingState === "loading" ? "Analyzing..." : "Search & Analyze"}
+          {loadingState === "loading" ? "Scanning..." : "Execute trace"}
         </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -352,6 +419,30 @@ export default function OmniTraceDashboard() {
           Upload a file or paste a URL/hash to submit for dynamic sandbox analysis
           via Hybrid Analysis or ANY.RUN.
         </p>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <input
+            type="url"
+            value={sandboxTarget}
+            onChange={(event) => setSandboxTarget(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void handleSearch(sandboxTarget, "url");
+              }
+            }}
+            className="terminal-input flex-auto border border-green-900 bg-black/60 px-4 py-3 text-sm text-green-200 placeholder:text-green-900 focus:outline-none"
+            placeholder="https://suspicious-target.example"
+            aria-label="Sandbox URL"
+          />
+          <button
+            type="button"
+            disabled={!sandboxTarget.trim() || loadingState === "loading"}
+            onClick={() => void handleSearch(sandboxTarget, "url")}
+            className="border border-red-500/70 bg-red-950/30 px-6 py-3 text-xs font-bold uppercase tracking-widest text-red-300 hover:bg-red-950/60 disabled:opacity-40"
+          >
+            Detonate URL
+          </button>
+        </div>
       </div>
     </div>
   );

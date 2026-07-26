@@ -4,12 +4,12 @@ import { Sparkles } from "lucide-react";
 
 export default function AIPanel({ summary }: { summary: string }) {
   return (
-    <div className="bg-gradient-to-br from-brand-900/30 to-slate-800/60 border border-brand-700/50 rounded-xl p-4 space-y-2">
-      <div className="flex items-center gap-2 text-brand-400 font-semibold text-sm">
+    <div className="space-y-2 border border-green-900/70 bg-green-950/20 p-4">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-green-400">
         <Sparkles className="w-4 h-4" />
-        AI Intelligence Summary
+        AI intelligence synthesis
       </div>
-      <p className="text-slate-200 text-sm leading-relaxed whitespace-pre-wrap">{summary}</p>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-green-200/80">{summary}</p>
     </div>
   );
 }

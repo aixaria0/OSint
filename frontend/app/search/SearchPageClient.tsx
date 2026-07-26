@@ -6,6 +6,7 @@ import { Search, ArrowLeft, RefreshCw } from "lucide-react";
 import ResultCard from "@/components/ResultCard";
 import AIPanel from "@/components/AIPanel";
 import VTChart from "@/components/VTChart";
+import { getApiUrl } from "@/lib/api";
 
 interface IntegrationResult {
   source: string;
@@ -38,7 +39,10 @@ export default function SearchPageClient() {
     setError(null);
     setData(null);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const apiUrl = getApiUrl();
+      if (!apiUrl) {
+        throw new Error("Search service is not configured.");
+      }
       const res = await fetch(`${apiUrl}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

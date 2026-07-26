@@ -21,8 +21,8 @@ export default function VTChart({ data }: Props) {
   if (chartData.length === 0) return null;
 
   return (
-    <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
-      <h3 className="font-semibold text-sm mb-3 text-slate-300">VirusTotal Detection Breakdown</h3>
+    <div className="border border-green-950 bg-black/30 p-4">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-green-400">VirusTotal detection breakdown</h3>
       <ResponsiveContainer width="100%" height={220}>
         <PieChart>
           <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
